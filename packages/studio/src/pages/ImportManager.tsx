@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { fetchJson, useApi, postApi } from "../hooks/use-api";
 import type { Theme } from "../hooks/use-theme";
 import type { TFunction } from "../hooks/use-i18n";
@@ -27,6 +27,24 @@ export function ImportManager({ nav, theme, t }: { nav: Nav; theme: Theme; t: TF
   const [chText, setChText] = useState("");
   const [chBookId, setChBookId] = useState("");
   const [chSplitRegex, setChSplitRegex] = useState("");
+  const [chResumeFrom, setChResumeFrom] = useState(1);
+  const [chNextChapter, setChNextChapter] = useState(1);
+
+  // Fetch book info to detect existing chapter count
+  useEffect(() => {
+    if (!chBookId) {
+      setChResumeFrom(1);
+      setChNextChapter(1);
+      return;
+    }
+    fetchJson<{ nextChapter?: number }>(`/books/${chBookId}`)
+      .then((data) => {
+        const next = data.nextChapter ?? 1;
+        setChResumeFrom(next);
+        setChNextChapter(next);
+      })
+      .catch(() => {});
+  }, [chBookId]);
 
   // Canon state
   const [canonTarget, setCanonTarget] = useState("");
@@ -44,12 +62,24 @@ export function ImportManager({ nav, theme, t }: { nav: Nav; theme: Theme; t: TF
     setLoading(true);
     setStatus("");
     try {
-      const data = await fetchJson<{ importedCount?: number }>(`/books/${chBookId}/import/chapters`, {
+      const body: Record<string, unknown> = {
+        text: chText,
+        splitRegex: chSplitRegex || undefined,
+      };
+      // Only include resumeFrom when explicitly set to skip foundation regeneration
+      if (chResumeFrom > 1) {
+        body.resumeFrom = chResumeFrom;
+      }
+      const data = await fetchJson<{ importedCount?: number; nextChapter?: number }>(`/books/${chBookId}/import/chapters`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: chText, splitRegex: chSplitRegex || undefined }),
+        body: JSON.stringify(body),
       });
       setStatus(`Imported ${data.importedCount} chapters`);
+      if (data.nextChapter) {
+        setChNextChapter(data.nextChapter);
+        setChResumeFrom(data.nextChapter);
+      }
     } catch (e) {
       setStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -132,6 +162,20 @@ export function ImportManager({ nav, theme, t }: { nav: Nav; theme: Theme; t: TF
               <option value="">{t("import.selectTarget")}</option>
               {booksData?.books.map((b) => <option key={b.id} value={b.id}>{b.title}</option>)}
             </select>
+            {chBookId && (
+              <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                <span>该书籍已有 {chNextChapter - 1} 章，将从第 {chNextChapter} 章开始导入</span>
+                <input
+                  type="number"
+                  min={1}
+                  value={chResumeFrom}
+                  onChange={(e) => setChResumeFrom(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-20 px-2 py-1 rounded border border-border bg-secondary/30 text-xs font-mono"
+                  title="手动调整起始章节"
+                />
+                <span className="text-[10px]">（调整可重新生成基础设定）</span>
+              </div>
+            )}
             <input
               type="text" value={chSplitRegex} onChange={(e) => setChSplitRegex(e.target.value)}
               placeholder={t("import.splitRegex")}
