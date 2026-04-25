@@ -16,6 +16,7 @@ import { StyleManager } from "./pages/StyleManager";
 import { ImportManager } from "./pages/ImportManager";
 import { RadarView } from "./pages/RadarView";
 import { DoctorView } from "./pages/DoctorView";
+import { BatchTestPage } from "./pages/BatchTestPage";
 import { LanguageSelector } from "./pages/LanguageSelector";
 import { BookSidebar, BookSidebarToggle } from "./components/chat/BookSidebar";
 import { useSSE } from "./hooks/use-sse";
@@ -76,6 +77,7 @@ export function App() {
     toImport: () => setRoute({ page: "import" }),
     toRadar: () => setRoute({ page: "radar" }),
     toDoctor: () => setRoute({ page: "doctor" }),
+    toBatchTest: () => setRoute({ page: "batch-test" }),
   };
 
   const activeBookId = deriveActiveBookId(route);
@@ -240,6 +242,11 @@ export function App() {
           {route.page === "doctor" && (
             <div className="max-w-4xl mx-auto px-6 py-12 md:px-12 lg:py-16 fade-in">
               <DoctorView nav={nav} theme={theme} t={t} />
+            </div>
+          )}
+          {route.page === "batch-test" && (
+            <div className="max-w-4xl mx-auto px-6 py-12 md:px-12 lg:py-16 fade-in">
+              <BatchTestPage nav={nav} />
             </div>
           )}
         </main>

@@ -511,6 +511,62 @@ async function probeServiceCapabilities(args: {
   };
 }
 
+// Simplified single-model probe for batch testing — fixed model, no iteration
+async function probeSingleModel(args: {
+  root: string;
+  service: string;
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  preferredApiFormat?: "chat" | "responses";
+  preferredStream?: boolean;
+}): Promise<{
+  ok: boolean;
+  selectedModel?: string;
+  detected?: {
+    apiFormat: "chat" | "responses";
+    stream: boolean;
+    baseUrl: string;
+  };
+  error?: string;
+}> {
+  const baseService = isCustomServiceId(args.service) ? "custom" : args.service;
+  const planApiFormat = args.preferredApiFormat ?? "chat";
+  const planStream = args.preferredStream ?? false;
+
+  const client = createLLMClient({
+    provider: resolveServiceProviderFamily(baseService) ?? "openai",
+    service: baseService,
+    configSource: "studio",
+    baseUrl: args.baseUrl,
+    apiKey: args.apiKey.trim(),
+    model: args.model,
+    temperature: 0.7,
+    maxTokens: 2048,
+    thinkingBudget: 0,
+    apiFormat: planApiFormat,
+    stream: planStream,
+  } as ProjectConfig["llm"]);
+
+  try {
+    await chatCompletion(client, args.model, [{ role: "user", content: "ping" }], { maxTokens: 2048 });
+    return {
+      ok: true,
+      selectedModel: args.model,
+      detected: {
+        apiFormat: planApiFormat,
+        stream: planStream,
+        baseUrl: args.baseUrl,
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 // --- Server factory ---
 
 export function createStudioServer(initialConfig: ProjectConfig, root: string) {
@@ -989,6 +1045,68 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     return c.json({ ok: true });
   });
 
+  // --- Batch model test (registered BEFORE /:service/test to avoid "batch-test" being captured as :service) ---
+  app.post("/api/v1/services/batch-test", async (c) => {
+    const { entries } = await c.req.json<{
+      entries: Array<{
+        service: string;
+        model: string;
+        apiKey: string;
+        baseUrl?: string;
+        apiFormat?: "chat" | "responses";
+        stream?: boolean;
+      }>;
+    }>();
+
+    if (!Array.isArray(entries) || entries.length === 0) {
+      return c.json({ error: "entries array is required" }, 400);
+    }
+
+    const results = await Promise.all(
+      entries.map(async (entry) => {
+        const resolvedBaseUrl = entry.baseUrl?.trim()
+          ?? await resolveConfiguredServiceBaseUrl(root, entry.service);
+
+        if (!resolvedBaseUrl) {
+          return { service: entry.service, model: entry.model, ok: false, error: `未知服务商: ${entry.service}` };
+        }
+
+        try {
+          const probe = await probeSingleModel({
+            root,
+            service: entry.service,
+            apiKey: entry.apiKey.trim(),
+            baseUrl: resolvedBaseUrl,
+            model: entry.model,
+            preferredApiFormat: entry.apiFormat,
+            preferredStream: entry.stream,
+          });
+          return {
+            service: entry.service,
+            model: entry.model,
+            ok: probe.ok,
+            ...(probe.ok ? {
+              selectedModel: probe.selectedModel,
+              detected: probe.detected,
+            } : {
+              error: probe.error,
+            }),
+          };
+        } catch (e) {
+          return {
+            service: entry.service,
+            model: entry.model,
+            ok: false,
+            error: e instanceof Error ? e.message : "测试失败",
+          };
+        }
+      }),
+    );
+
+    const anyPassed = results.some((r) => r.ok);
+    return c.json({ results, anyPassed });
+  });
+
   app.post("/api/v1/services/:service/test", async (c) => {
     const service = c.req.param("service");
     const { apiKey, baseUrl, apiFormat, stream } = await c.req.json<{
@@ -1104,6 +1222,44 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     }
     modelListCache.set(cacheKey, { models, at: Date.now() });
     return c.json({ models });
+  });
+
+  // --- Import from .env ---
+  app.post("/api/v1/services/import-from-env", async (c) => {
+    const body = await c.req.json<{ scope?: "project" | "global" }>().catch(() => ({ scope: "project" as const }));
+
+    const envPath = body.scope === "global" ? GLOBAL_ENV_PATH : join(root, ".env");
+    const envSummary = await readEnvConfigSummary(envPath);
+
+    if (!envSummary.detected) {
+      return c.json({ error: "No INKOS_LLM_* variables found in target .env" }, 400);
+    }
+
+    const serviceId = envSummary.provider ?? "custom";
+    const isKnownService = ["openai", "anthropic", "deepseek", "moonshot", "minimax", "bailian", "zhipu", "siliconflow", "ppio", "openrouter", "ollama"].includes(serviceId);
+
+    const importEntry: ServiceConfigEntry = {
+      service: isKnownService ? serviceId : "custom",
+      ...(envSummary.baseUrl ? { baseUrl: envSummary.baseUrl } : {}),
+      ...(envSummary.model ? { name: envSummary.model } : {}),
+    };
+
+    const config = await loadRawConfig(root);
+    const llm = (config.llm as Record<string, unknown> | undefined) ?? {};
+    const existingServices = normalizeServiceConfig(llm.services);
+
+    const mergedServices = mergeServiceConfig(existingServices, [importEntry]);
+    llm.services = mergedServices;
+
+    if (envSummary.model) {
+      llm.defaultModel = envSummary.model;
+    }
+
+    llm.configSource = "studio";
+    config.llm = llm;
+    await saveRawConfig(root, config);
+
+    return c.json({ ok: true, imported: importEntry });
   });
 
   // --- Project info ---

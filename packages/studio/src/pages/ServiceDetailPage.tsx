@@ -53,6 +53,12 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
   const [stream, setStream] = useState(true);
   const [detectedModel, setDetectedModel] = useState<string>("");
   const [detectedConfig, setDetectedConfig] = useState<DetectedConfig | null>(null);
+  // -- Model management --
+  const [customModels, setCustomModels] = useState<string[]>([]);
+  const [newModelInput, setNewModelInput] = useState("");
+  const [testSpecificModel, setTestSpecificModel] = useState("");
+  const [testSpecificLoading, setTestSpecificLoading] = useState(false);
+  const [testSpecificResult, setTestSpecificResult] = useState<{ ok: boolean; error?: string } | null>(null);
 
   // -- Unified connection status --
   const [status, setStatus] = useState<ConnectionStatus>({ state: "idle" });
@@ -89,12 +95,10 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
 
   useEffect(() => {
     let cancelled = false;
-    if (svc?.connected) {
-      setStatus({ state: "testing" });
-    }
+    // Only rehydrate the stored API key — do NOT auto-test on page load
     void rehydrateServiceConnectionStatus({
       effectiveServiceId,
-      shouldVerify: Boolean(svc?.connected),
+      shouldVerify: false,  // NEVER auto-test on rehydration
       isCustom,
       baseUrl,
       apiFormat,
@@ -105,11 +109,11 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
         setApiKey(result.apiKey);
         setDetectedModel(result.detectedModel);
         setDetectedConfig(result.detectedConfig);
-        setStatus(result.status);
-        if (result.status.state === "connected") {
-          setStoreModels(effectiveServiceId, result.status.models);
-        } else {
-          clearStoreModels(effectiveServiceId);
+        // If previously saved as connected, restore that UI state without re-testing
+        if (svc?.connected && result.apiKey) {
+          setStatus({ state: "connected", models: [] });
+        } else if (result.status.state === "error") {
+          setStatus(result.status);
         }
       })
       .catch(() => {
@@ -120,10 +124,8 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
   }, [
     apiFormat,
     baseUrl,
-    clearStoreModels,
     effectiveServiceId,
     isCustom,
-    setStoreModels,
     stream,
     svc?.connected,
   ]);
@@ -172,6 +174,69 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
       setStatus({ state: "error", message: e instanceof Error ? e.message : "连接失败" });
     }
   };
+
+  // -- Add custom model to the list --
+  const handleAddModel = () => {
+    const trimmed = newModelInput.trim();
+    if (!trimmed) return;
+    if (customModels.includes(trimmed)) {
+      setNewModelInput("");
+      return;
+    }
+    setCustomModels((prev) => [...prev, trimmed]);
+    setNewModelInput("");
+  };
+
+  const handleRemoveModel = (model: string) => {
+    setCustomModels((prev) => prev.filter((m) => m !== model));
+  };
+
+  // -- Test specific model --
+  const handleTestSpecificModel = async () => {
+    const trimmedKey = apiKey.trim();
+    const trimmedModel = testSpecificModel.trim();
+    if (!trimmedKey) {
+      setTestSpecificResult({ ok: false, error: "请先输入 API Key" });
+      return;
+    }
+    if (!trimmedModel) {
+      setTestSpecificResult({ ok: false, error: "请输入要测试的模型名称" });
+      return;
+    }
+    setTestSpecificLoading(true);
+    setTestSpecificResult(null);
+    try {
+      const data = await fetchJson<{ results: any[]; anyPassed: boolean }>("/services/batch-test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entries: [{
+            service: serviceId,
+            model: trimmedModel,
+            apiKey: trimmedKey,
+            baseUrl: baseUrl.trim() || undefined,
+            apiFormat,
+            stream,
+          }],
+        }),
+      });
+      const entry = data.results?.[0];
+      setTestSpecificResult({
+        ok: entry?.ok ?? false,
+        error: entry?.ok ? undefined : entry?.error,
+      });
+    } catch (e) {
+      setTestSpecificResult({ ok: false, error: e instanceof Error ? e.message : "测试失败" });
+    } finally {
+      setTestSpecificLoading(false);
+    }
+  };
+
+  // -- All models = discovered + custom --
+  const allModels = [
+    ...models.map((m) => ({ id: m.id, name: m.name ?? m.id, source: "discovered" as const })),
+    ...customModels.map((m) => ({ id: m, name: m, source: "custom" as const })),
+  ];
 
   const handleSave = async () => {
     const trimmedKey = apiKey.trim();
@@ -247,12 +312,15 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
               <input type="text" value={customName} onChange={(e) => setCustomName(e.target.value)}
                 placeholder="例如：本地 Ollama" className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm" />
             </Field>
-            <Field label="Base URL">
-              <input type="text" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder="https://api.example.com/v1" className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm font-mono" />
-            </Field>
           </div>
         )}
+
+        {/* Base URL - 所有服务商都支持覆盖 */}
+        <Field label="Base URL（可选）">
+          <input type="text" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)}
+            placeholder={isCustom ? "https://api.example.com/v1" : `留空则使用默认地址，如 https://api.deepseek.com/v1`}
+            className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm font-mono" />
+        </Field>
 
         {/* API Key */}
         <Field label="API Key">
@@ -321,20 +389,87 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
         </div>
 
         {/* Models */}
-        {models.length > 0 && (
-          <div className="space-y-2">
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
             <p className="text-xs text-muted-foreground/70 font-medium uppercase tracking-wider">
-              可用模型（{models.length}）
+              模型列表（{allModels.length}）
             </p>
-            <div className="flex gap-1.5 flex-wrap">
-              {models.map((m) => (
-                <span key={m.id} className="text-[11px] px-2.5 py-1 rounded-md bg-emerald-500/[0.06] text-emerald-600 dark:text-emerald-400 border border-emerald-500/15">
-                  {m.name ?? m.id}
-                </span>
-              ))}
-            </div>
           </div>
-        )}
+
+          {/* Discovered models */}
+          {models.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[10px] text-muted-foreground/50">自动发现</p>
+              <div className="flex gap-1.5 flex-wrap">
+                {models.map((m) => (
+                  <span key={m.id} className="text-[11px] px-2.5 py-1 rounded-md bg-emerald-500/[0.06] text-emerald-600 dark:text-emerald-400 border border-emerald-500/15">
+                    {m.name ?? m.id}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Custom models */}
+          {customModels.length > 0 && (
+            <div className="space-y-1.5">
+              <p className="text-[10px] text-muted-foreground/50">手动添加</p>
+              <div className="flex gap-1.5 flex-wrap">
+                {customModels.map((m) => (
+                  <span key={m} className="text-[11px] px-2 py-1 rounded-md bg-primary/10 text-primary border border-primary/20 inline-flex items-center gap-1">
+                    {m}
+                    <button onClick={() => handleRemoveModel(m)} className="hover:text-primary/60 ml-0.5">×</button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Add custom model */}
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={newModelInput}
+              onChange={(e) => setNewModelInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleAddModel(); }}}
+              placeholder="输入模型名称后按回车添加"
+              className="flex-1 rounded-lg border border-border/60 bg-background px-3 py-1.5 text-xs font-mono"
+            />
+            <button
+              onClick={handleAddModel}
+              className="px-2.5 py-1.5 text-xs rounded-lg border border-border/60 hover:bg-secondary/50 transition-colors"
+            >
+              添加
+            </button>
+          </div>
+        </div>
+
+        {/* Test specific model */}
+        <div className="space-y-2 rounded-xl border border-border/40 bg-secondary/20 p-4">
+          <p className="text-xs text-muted-foreground/70 font-medium">指定模型测试</p>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={testSpecificModel}
+              onChange={(e) => setTestSpecificModel(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); handleTestSpecificModel(); }}}
+              placeholder="输入模型名称，如 gpt-4o"
+              className="flex-1 rounded-lg border border-border/60 bg-background px-3 py-1.5 text-xs font-mono"
+            />
+            <button
+              onClick={handleTestSpecificModel}
+              disabled={testSpecificLoading}
+              className="px-3 py-1.5 text-xs rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
+            >
+              {testSpecificLoading ? "测试中…" : "测试"}
+            </button>
+          </div>
+          {testSpecificResult && (
+            <p className={`text-[11px] ${testSpecificResult.ok ? "text-emerald-500" : "text-rose-500"}`}>
+              {testSpecificResult.ok ? `✓ ${testSpecificModel} 测试通过` : `✗ ${testSpecificResult.error}`}
+            </p>
+          )}
+        </div>
 
         {/* Advanced params */}
         <details className="group pt-2 border-t border-border/20">

@@ -7,6 +7,8 @@ export const useServiceStore = create<ServiceStore>()((set, get) => ({
   services: [],
   servicesLoading: false,
   modelsByService: {},
+  batchTestResults: {},
+  batchTestRunning: false,
 
   // -- Actions --
 
@@ -79,6 +81,28 @@ export const useServiceStore = create<ServiceStore>()((set, get) => ({
     set({ services: [], servicesLoading: false });
     await get().fetchServices();
   },
+
+  runBatchTest: async (entries) => {
+    set({ batchTestRunning: true });
+    try {
+      const data = await fetchJson<{ results: any[]; anyPassed: boolean }>("/services/batch-test", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entries }),
+      });
+      const resultsMap: Record<string, any> = {};
+      for (const r of data.results) {
+        resultsMap[`${r.service}:${r.model}`] = r;
+      }
+      set({ batchTestResults: resultsMap, batchTestRunning: false });
+      return data as { results: any[]; anyPassed: boolean };
+    } catch (e) {
+      set({ batchTestRunning: false });
+      throw e;
+    }
+  },
+
+  clearBatchTestResults: () => set({ batchTestResults: {} }),
 
   // -- Selectors --
 

@@ -1,11 +1,15 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useServiceStore } from "../store/service";
 import type { ServiceInfo } from "../store/service";
 import { ServiceConfigSourceCard } from "../components/ServiceConfigSourceCard";
+import { EnvImportBanner } from "../components/EnvImportBanner";
+import { FlaskConical } from "lucide-react";
+import { fetchJson } from "../hooks/use-api";
 
 interface Nav {
   toDashboard: () => void;
   toServiceDetail: (id: string) => void;
+  toBatchTest: () => void;
 }
 
 function SkeletonCard() {
@@ -26,7 +30,29 @@ export function ServiceListPage({ nav }: { nav: Nav }) {
   const fetchServices = useServiceStore((s) => s.fetchServices);
   const refreshServices = useServiceStore((s) => s.refreshServices);
 
+  const [configData, setConfigData] = useState<{
+    envConfig: {
+      project: { detected: boolean; provider: string | null; baseUrl: string | null; model: string | null; hasApiKey: boolean };
+      global: { detected: boolean; provider: string | null; baseUrl: string | null; model: string | null; hasApiKey: boolean };
+      effectiveSource: "project" | "global" | null;
+    };
+    services: unknown[];
+  } | null>(null);
+
   useEffect(() => { void fetchServices(); }, [fetchServices]);
+
+  useEffect(() => {
+    fetchJson<{ envConfig: typeof configData extends infer T ? T extends { envConfig: infer U } ? U : never : never; services: unknown[] }>("/services/config")
+      .then((data) => setConfigData(data as any))
+      .catch(() => {});
+  }, []);
+
+  const handleImported = () => {
+    void refreshServices();
+    fetchJson<typeof configData>("/services/config")
+      .then((data) => setConfigData(data as any))
+      .catch(() => {});
+  };
 
   return (
     <div className="max-w-2xl mx-auto space-y-8">
@@ -41,9 +67,22 @@ export function ServiceListPage({ nav }: { nav: Nav }) {
         <span className="text-foreground">服务商管理</span>
       </div>
 
-      <h1 className="font-serif text-2xl">服务商管理</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="font-serif text-2xl">服务商管理</h1>
+        <button
+          onClick={nav.toBatchTest}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-border/50 bg-card/60 px-3 py-1.5 text-sm font-medium text-foreground hover:bg-secondary/50 transition-colors"
+        >
+          <FlaskConical size={14} />
+          批量测试
+        </button>
+      </div>
 
       <ServiceConfigSourceCard onChange={() => { void refreshServices(); }} />
+
+      {configData && services.length === 0 && (
+        <EnvImportBanner envConfig={configData.envConfig} onImported={handleImported} />
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         {loading

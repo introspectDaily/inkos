@@ -15,6 +15,28 @@ export interface ServiceModelsEntry {
   readonly error: string | null;
 }
 
+export interface BatchTestEntry {
+  readonly service: string;
+  readonly model: string;
+  readonly apiKey: string;
+  readonly baseUrl?: string;
+  readonly apiFormat?: "chat" | "responses";
+  readonly stream?: boolean;
+}
+
+export interface BatchTestResult {
+  readonly service: string;
+  readonly model: string;
+  readonly ok: boolean;
+  readonly error?: string;
+  readonly selectedModel?: string;
+  readonly detected?: {
+    readonly apiFormat?: "chat" | "responses";
+    readonly stream?: boolean;
+    readonly baseUrl?: string;
+  };
+}
+
 // -- State --
 
 export interface ServiceState {
@@ -23,6 +45,10 @@ export interface ServiceState {
   servicesLoading: boolean;
   /** Models keyed by service id, fetched on demand */
   modelsByService: Record<string, ServiceModelsEntry>;
+  /** Batch test results keyed by `${service}:${model}` */
+  batchTestResults: Record<string, BatchTestResult>;
+  /** Whether a batch test is currently running */
+  batchTestRunning: boolean;
 }
 
 // -- Actions --
@@ -38,6 +64,10 @@ export interface ServiceActions {
   clearModels: (service: string) => void;
   /** Invalidate and re-fetch services (after saving a key) */
   refreshServices: () => Promise<void>;
+  /** Run batch test for multiple (service, model, apiKey) entries */
+  runBatchTest: (entries: BatchTestEntry[]) => Promise<{ results: BatchTestResult[]; anyPassed: boolean }>;
+  /** Clear batch test results */
+  clearBatchTestResults: () => void;
 }
 
 // -- Derived (selectors) --
