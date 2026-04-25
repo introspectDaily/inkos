@@ -13,6 +13,8 @@ const BOOK_REFRESH_EVENTS = new Set([
   "revise:error",
   "audit:complete",
   "audit:error",
+  "import:complete",
+  "import:error",
 ]);
 
 const BOOK_COLLECTION_REFRESH_EVENTS = new Set([
