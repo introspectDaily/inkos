@@ -2358,7 +2358,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
   app.post("/api/v1/books/:id/import/chapters", async (c) => {
     const id = c.req.param("id");
-    const { text, splitRegex } = await c.req.json<{ text: string; splitRegex?: string }>();
+    const { text, splitRegex, resumeFrom } = await c.req.json<{ text: string; splitRegex?: string; resumeFrom?: number }>();
     if (!text?.trim()) return c.json({ error: "text is required" }, 400);
 
     broadcast("import:start", { bookId: id, type: "chapters" });
@@ -2366,8 +2366,14 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       const { splitChapters } = await import("@actalk/inkos-core");
       const chapters = [...splitChapters(text, splitRegex)];
 
+      if (chapters.length === 0) {
+        return c.json({
+          error: "No chapters could be split from the text. Please check your chapter title format (e.g. '第1章', '第一章', 'Chapter 1') or provide a custom split regex.",
+        }, 400);
+      }
+
       const pipeline = new PipelineRunner(await buildPipelineConfig());
-      const result = await pipeline.importChapters({ bookId: id, chapters });
+      const result = await pipeline.importChapters({ bookId: id, chapters, resumeFrom });
       broadcast("import:complete", { bookId: id, type: "chapters", count: result.importedCount });
       return c.json(result);
     } catch (e) {

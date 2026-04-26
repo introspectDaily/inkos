@@ -2172,6 +2172,15 @@ ${matrix}`,
 
       // Step 1: Generate foundation on first run (not on resume)
       if (startFrom === 1) {
+        // Guard: if no chapters to process, abort early instead of calling AI with empty content
+        if (input.chapters.length === 0) {
+          throw new Error(
+            this.localize(resolvedLanguage, {
+              zh: '未能从文本中分割出任何章节，请检查章节标题格式是否正确（如"第1章"、"第一章"或"Chapter 1"），或提供自定义分割正则。',
+              en: "No chapters could be split from the text. Please check your chapter title format (e.g. Chapter 1, 第1章) or provide a custom split regex.",
+            }),
+          );
+        }
         log?.info(this.localize(resolvedLanguage, {
           zh: `步骤 1：从 ${input.chapters.length} 章生成基础设定...`,
           en: `Step 1: Generating foundation from ${input.chapters.length} chapters...`,
