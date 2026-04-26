@@ -113,7 +113,7 @@ export function buildAgentSystemPrompt(bookId: string | null, language: string):
 2. 用 \`read\` 读取当前 \`index.json\`
 3. 对比两者，找出磁盘上有但索引中缺失的章节
 4. 同一章号有多个文件时（重写），取文件名排序最后的那个（最新版本）
-5. 用 \`edit\` 更新 \`index.json\`，补上缺失条目（status 设为 "ready-for-review"，wordCount 通过读取文件内容统计中文字符数）
+5. 用 \`edit\` 更新 \`index.json\`，补上缺失条目（status 设为 "ready-for-review"，wordCount 通过读取文件内容统计中文字符数），如果 index.json 文件已经存在, 优先使用 edit 而不是 write, 避免其他agent更新了 index.json, 我们又使用了write 覆盖了别人的更新。
 
 ## 输出格式
 
@@ -165,7 +165,7 @@ If you notice the index is inconsistent with the actual files on disk (e.g. side
 2. \`read\` the current \`index.json\`
 3. Compare and find chapters on disk but missing from the index
 4. When multiple files exist for the same chapter number (rewrites), use the last one alphabetically (latest version)
-5. \`edit\` the \`index.json\` to add missing entries (status: "ready-for-review", wordCount: count Chinese characters from the file content)
+5. \`edit\` the \`index.json\` to add missing entries (status: "ready-for-review", wordCount: count Chinese characters from the file content). If the index.json file already exists, we should prioritize using edit over write to prevent other agents from updating the index.json and then using write to overwrite others' updates.
 
 ## Output Format
 
