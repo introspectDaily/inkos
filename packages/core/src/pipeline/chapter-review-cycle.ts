@@ -104,23 +104,30 @@ export async function runChapterReviewCycle(params: {
       description: violation.description,
       suggestion: violation.suggestion,
     }));
-    const fixResult = await reviser.reviseChapter(
-      params.bookDir,
-      finalContent,
-      params.chapterNumber,
-      spotFixIssues,
-      "spot-fix",
-      params.book.genre,
-      {
-        ...params.reducedControlInput,
-        lengthSpec: params.lengthSpec,
-      },
-    );
-    totalUsage = params.addUsage(totalUsage, fixResult.tokenUsage);
-    if (fixResult.revisedContent.length > 0) {
-      finalContent = fixResult.revisedContent;
-      finalWordCount = fixResult.wordCount;
-      revised = true;
+    try {
+      const fixResult = await reviser.reviseChapter(
+        params.bookDir,
+        finalContent,
+        params.chapterNumber,
+        spotFixIssues,
+        "spot-fix",
+        params.book.genre,
+        {
+          ...params.reducedControlInput,
+          lengthSpec: params.lengthSpec,
+        },
+      );
+      totalUsage = params.addUsage(totalUsage, fixResult.tokenUsage);
+      if (fixResult.revisedContent.length > 0) {
+        finalContent = fixResult.revisedContent;
+        finalWordCount = fixResult.wordCount;
+        revised = true;
+      }
+    } catch (fixErr) {
+      params.logWarn({
+        zh: `spot-fix 修补失败（${String(fixErr)}），跳过修补继续流程`,
+        en: `spot-fix failed (${String(fixErr)}), skipping and continuing`,
+      });
     }
   }
 
@@ -154,52 +161,59 @@ export async function runChapterReviewCycle(params: {
     if (criticalIssues.length > 0) {
       const reviser = params.createReviser();
       params.logStage({ zh: "自动修复关键问题", en: "auto-revising critical issues" });
-      const reviseOutput = await reviser.reviseChapter(
-        params.bookDir,
-        finalContent,
-        params.chapterNumber,
-        auditResult.issues,
-        "spot-fix",
-        params.book.genre,
-        {
-          ...params.reducedControlInput,
-          lengthSpec: params.lengthSpec,
-        },
-      );
-      totalUsage = params.addUsage(totalUsage, reviseOutput.tokenUsage);
-
-      if (reviseOutput.revisedContent.length > 0) {
-        const normalizedRevision = await params.normalizeDraftLengthIfNeeded(reviseOutput.revisedContent);
-        totalUsage = params.addUsage(totalUsage, normalizedRevision.tokenUsage);
-        postReviseCount = normalizedRevision.wordCount;
-        normalizeApplied = normalizeApplied || normalizedRevision.applied;
-
-        const preMarkers = params.analyzeAITells(finalContent);
-        const postMarkers = params.analyzeAITells(normalizedRevision.content);
-        if (postMarkers.issues.length <= preMarkers.issues.length) {
-          finalContent = normalizedRevision.content;
-          finalWordCount = normalizedRevision.wordCount;
-          revised = true;
-          params.assertChapterContentNotEmpty(finalContent, "revision");
-        }
-
-        const reAudit = await params.auditor.auditChapter(
+      try {
+        const reviseOutput = await reviser.reviseChapter(
           params.bookDir,
           finalContent,
           params.chapterNumber,
+          auditResult.issues,
+          "spot-fix",
           params.book.genre,
-          params.reducedControlInput
-            ? { ...params.reducedControlInput, temperature: 0 }
-            : { temperature: 0 },
+          {
+            ...params.reducedControlInput,
+            lengthSpec: params.lengthSpec,
+          },
         );
-        totalUsage = params.addUsage(totalUsage, reAudit.tokenUsage);
-        const reAITells = params.analyzeAITells(finalContent);
-        const reSensitive = params.analyzeSensitiveWords(finalContent);
-        const reHasBlocked = reSensitive.found.some((item) => item.severity === "block");
-        auditResult = params.restoreLostAuditIssues(auditResult, {
-          passed: reHasBlocked ? false : reAudit.passed,
-          issues: [...reAudit.issues, ...reAITells.issues, ...reSensitive.issues],
-          summary: reAudit.summary,
+        totalUsage = params.addUsage(totalUsage, reviseOutput.tokenUsage);
+
+        if (reviseOutput.revisedContent.length > 0) {
+          const normalizedRevision = await params.normalizeDraftLengthIfNeeded(reviseOutput.revisedContent);
+          totalUsage = params.addUsage(totalUsage, normalizedRevision.tokenUsage);
+          postReviseCount = normalizedRevision.wordCount;
+          normalizeApplied = normalizeApplied || normalizedRevision.applied;
+
+          const preMarkers = params.analyzeAITells(finalContent);
+          const postMarkers = params.analyzeAITells(normalizedRevision.content);
+          if (postMarkers.issues.length <= preMarkers.issues.length) {
+            finalContent = normalizedRevision.content;
+            finalWordCount = normalizedRevision.wordCount;
+            revised = true;
+            params.assertChapterContentNotEmpty(finalContent, "revision");
+          }
+
+          const reAudit = await params.auditor.auditChapter(
+            params.bookDir,
+            finalContent,
+            params.chapterNumber,
+            params.book.genre,
+            params.reducedControlInput
+              ? { ...params.reducedControlInput, temperature: 0 }
+              : { temperature: 0 },
+          );
+          totalUsage = params.addUsage(totalUsage, reAudit.tokenUsage);
+          const reAITells = params.analyzeAITells(finalContent);
+          const reSensitive = params.analyzeSensitiveWords(finalContent);
+          const reHasBlocked = reSensitive.found.some((item) => item.severity === "block");
+          auditResult = params.restoreLostAuditIssues(auditResult, {
+            passed: reHasBlocked ? false : reAudit.passed,
+            issues: [...reAudit.issues, ...reAITells.issues, ...reSensitive.issues],
+            summary: reAudit.summary,
+          });
+        }
+      } catch (fixErr) {
+        params.logWarn({
+          zh: `自动修复失败（${String(fixErr)}），跳过修复继续流程`,
+          en: `auto-revise failed (${String(fixErr)}), skipping and continuing`,
         });
       }
     }
