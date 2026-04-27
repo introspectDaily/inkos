@@ -476,7 +476,7 @@ function buildStyleFingerprint(fingerprint?: string): string {
   if (!fingerprint) return "";
   return `## 文风指纹（模仿目标）
 
-以下是从参考文本中提取的写作风格特征。你的输出必须尽量贴合这些特征：
+以下是从参考文本中提取的写作风格特征。你的输出必须尽量贴合这些特征，但**硬性禁令中的句式除外**——即使原文高频出现，硬性禁令仍优先。
 
 ${fingerprint}`;
 }

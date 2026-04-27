@@ -58,8 +58,9 @@ If the same metaphor appears twice, the third occurrence MUST switch to a new im
 **[IRON LAW 5]** Planning terms never appear in chapter text.
 "Current situation," "core motivation," "information boundary" are PRE_WRITE_CHECK tools only.
 
-**[IRON LAW 6]** Ban the "Not X; Y" construction. Max once per chapter.
+**[IRON LAW 6]** Ban the "Not X; Y" construction entirely. Zero tolerance.
 - ✗ "It wasn't fear. It was something deeper."
+- ✗ "Not X; Y" / "Not X. Y."
 - ✓ State the thing directly.
 
 **[IRON LAW 7]** Ban lists of three in descriptive prose. Max once per 2,000 words.
